@@ -1,0 +1,171 @@
+---
+title: "\\textbf{Intermediate R}\\\nData Science and Visualization Techniques Beyond Base R"
+subtitle: "Exam I"
+author: "Johan Blixt Dackhammar"
+date: 2025-11-27
+output: 
+    pdf_document:
+        fig_width: 7
+        fig_height: 7
+        highlight: tango
+header-includes:
+  - \usepackage{etoolbox}
+  - \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+\newpage
+
+# Instructions
+
+This study focuses on the examination of maximal force generation in knee extensor and flexor muscles, emphasizing key parameters: movement speed, torque, and joint angle, using an isokinetic dynamometer. In this assignment, you will analyze output data — angle, speed, and torque — from one participant, measured before (8 files) and after exercise (8 files). The goal is to understand how force output changes across different movement speeds in response to exercise. Due to the high variability in the torque signal, a structured approach is needed to reliably identify key force characteristics. To address this, you will use the more stable angle variable.
+
+For each of the 16 files (folder structure below), you will:
+
+* Use the `peaks()` function from the `splus2R` package to identify segments based on the angle variable. 
+
+Within each defined angle-based segment, identify: 
+
+* the global minima of the torque variable (5 in total on the negative side of the y-axis). 
+* the global maxima of the torque variable (4 in total on the positive side of the y-axis). 
+
+Refer to provided figures in order to see how angle-based segments are defined, and for an example of the expected result showing torque minima and maxima. As an final outcome of the assignment, you are to submit 16 plots consolidated into a single .pdf file together with the Rmarkdown file to Canvas. Include your first and last name in the file names of both submitted files.
+
+**IMPORTANT INFORMATION ABOUT THE DATA!**
+**FOLDER STRUCTURE:**
+
+```
+Data 
+|-- BRACE_biodex_isokinetic_dynamometer_RAW_A_BID-4_20230415 
+|   |-- CTM01.txt 
+|   |-- CTM03.txt 
+|   |-- ... 
+|-- BRACE_biodex_isokinetic_dynamometer_RAW_A_R2_20230415 <br>
+|   |-- CTM02.txt 
+|   |-- CTM04.txt
+|   |-- ... 
+```
+
+**FILE INFO:**
+Each file contains two segments [info] and [data].
+For the analysis you will be focusing only on the [data] segment of the files.
+However [info] segment will be important for the final plotting. For that part you will need to extract the speed information of each file.
+Files with pattern BID refer to data measurements before exercise and files with pattern R2 refer to measurements after exercise. This information is also important for the plotting part of the assignment.
+All measurements are performed twice for each max speed (30, 90, 180 and 300). You can explore this in the [info] segment.
+
+**NOTE:**
+One of the files contains random ',' as a numeric separator, which will force the entire column to be read as a character class. You will need to replace the ',' separator with '.' to properly convert the column to numeric. In addition, [data] segment of the files does not contain corresponding header *c("Torque", "Speed", "Angle")*
+
+**INSTRUCTIONS:**
+YOU ARE ON YOUR OWN. GODD LUCK AND HAPPY CODING :)
+
+\newpage
+
+# Data exploration
+
+```{r setup, include=FALSE, echo=FALSE}
+# Load libraries we will use, whole tidyverse since we will at least use purrr, dplyr, readr, tidyr and stringr.
+library(tidyverse)
+library(splus2R)
+```
+
+So, data is messy, with info and data in the same files. We need to extract speed and data.
+
+```{r}
+# Create a list for the data
+df <- list()
+
+# Read the files
+files <- list.files("../data", pattern = "CTM\\d{2}\\.txt$", recursive = T, full.names = T)
+
+# Import the files reading lines after [data], coercing to character because of knowing , and . exists
+for (file in files) {
+    # Extract the name pattern according to target graph
+    name <- paste0(str_extract(file, "((A_BID|A_R2))"), "_", basename(file) |> str_remove("\\..*$"))
+    # Read lines to find speed and [data]
+    lines <- read_lines(file)
+    # Read the tsv data starting from below [data], coerce to character now for later conversion (instructions state erraneous data)
+    df[[name]] <- read_tsv(file, skip = which(lines == "[data]"), col_names = c("torque", "speed", "angle"), col_types = "ccc")
+    # Find the speed, store as attribute
+    attr(df[[name]], "speed") <- str_extract(lines[str_detect(lines, "^speed\\t")], "(?<=speed\\t)[0-9]+")
+    # Set before or after as attribute according to name
+    attr(df[[name]], "exercise") <- if_else(str_detect(name, "A_BID"), "Before", "After")
+}
+
+# Small helper function to fix tibbles, adding time and creating peak data and segments.
+# I struggled a bit here, first trying different options for span with the peaks function.
+# This did not generate a good result.
+# Since peaks and valleys differ a lot in the data, peaks ranging from 0 to -10 and
+# valleys from -90 to -100 we can use this difference to select the segments.
+fix_df <- function(df) {
+    df |>
+        # Fix the erraneous decimals and make numeric
+        mutate(across(everything(),
+            \(x) str_replace_all(x, ",", ".") |> as.numeric()
+        )) |> 
+        mutate(
+            time = row_number(), # Create a time variable
+            peak = splus2R::peaks(angle, strict = F), # Find peaks
+            peak_angle = if_else(peak, angle, NA_real_) # Get peak angles
+        ) |> 
+        fill(peak_angle, .direction = "down") |> # Fill this for lag function to work
+        mutate(
+            peak_angle = replace_na(peak_angle, first(angle)), # Fill before first peak with starting value
+            segment = cumsum(abs(peak_angle - lag(peak_angle, default = peak_angle[1])) > 20) # Create segments
+        ) |> 
+        select(-c(peak,peak_angle)) # Drop unneeded data
+}
+# Clean the data
+df <- map(df, fix_df)
+```
+
+We now have a named list with tibbles for each file, and segments.
+
+\newpage
+
+# Now lets do some plotting
+
+```{r}
+# Helper function to make plots
+make_plot <- function(df, name) {
+    # Make a tibble with min/max per segment
+    minmax <- df |> 
+        filter(segment %in% 1:9) |> 
+        group_by(segment) |> 
+        summarise(
+            # Choose if it's a min or max based on the mean torque of the segment
+            time = if_else(mean(torque, na.rm = T) > 0, time[which.max(torque)], time[which.min(torque)]),
+            torque = if_else(mean(torque, na.rm = T) > 0, max(torque, na.rm = T), min(torque, na.rm = T)),
+            .groups = "drop"
+        )
+    
+    p <- df |> 
+        select(-segment) |> # Drops segment since we don't want to plot it
+        pivot_longer(-c(time), names_to = "metric", values_to = "value") |> # Pivot longer to be able to color by metric 
+        ggplot() +
+        geom_line(aes(x = time, y = value, color = metric)) + # Create the lineplots, colored by metric
+        geom_point(data = minmax, aes(x = time, y = torque)) + # Points for minima and maxima per segment
+        geom_text(data = minmax, aes(x = time, y = torque, label = round(torque, 2), vjust = if_else(torque > 0, -1, 2))) + # Values for points
+        labs(
+            title = paste0("File: ", name),
+            subtitle = paste0("Exercise: ", attr(df, "exercise"),"\n", "Speed: ", attr(df, "speed")),
+            y = "Value",
+            x = "Time(min)",
+            color = ""
+        ) +
+        theme_bw() +
+        theme(legend.position = "bottom")
+
+    print(p)
+}
+
+# Create the plots (iwalk is useful here since we get the list and names(list) passed to the function)
+iwalk(df, make_plot)
+```
+
+
+```{r echo=FALSE}
+# Optionally create one pdf with just the plots
+pdf("../output/all_plots.pdf", height = 7, width = 7)
+iwalk(df, make_plot)
+dev.off()
+```
