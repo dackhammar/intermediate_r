@@ -1,0 +1,167 @@
+---
+title: Visualisation with ggplot
+author: Johan Blixt Dackhammar
+date: 2025-11-26
+output: pdf_document
+knitr: 
+    opts_chunk: 
+      echo: false
+      warning: false
+      message: false
+---
+
+```{r setup, echo=FALSE, include=FALSE}
+library(tidyverse)
+```
+
+# Boxplots with violins
+
+We start by loading and looking at the data.
+
+```{r plot1, echo=TRUE}
+data1 <- read_csv("../data/data_plot1.csv")
+glimpse(data1)
+```
+
+We can see that the first unnamed column is row number and the last column "myaxis" is the combination of `name`, newline `\n` and n=`n`. Looking at the original graph, this equals to the axis labels. The graph uses overlapped violin and boxplots with a fill that seems to use the default color scheme. There is a title and y-axis label but no x-axis label or legend.
+
+```{r}
+plot1 <- data1 |> 
+    ggplot(aes(myaxis, value, fill = name)) +
+    geom_violin(show.legend = F, ) +
+    geom_boxplot(show.legend = F, outliers = F, width = 0.1) +
+    labs(
+        title = "Boxplot + Violin", 
+        y = "Value",
+        x = ""
+    ) +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank())
+
+ggsave("../output/plot1.pdf", plot = plot1, width = 7, height = 4, dpi = 300)
+```
+
+# Simple Scatter Plot
+
+Here we are to recreate a scatterplot with area on x-axis and population on y-axis. Population density is mapped to point size and state to point color. There is a regression line. There is an added title, subtitle and axis labels for x and y axes but legends are not renamed. Theme looks like theme_bw()
+
+```{r, echo=FALSE}
+data2 <- read_csv("../data/data_plot2.csv") 
+glimpse(data2)
+plot2 <- data2 |> 
+    ggplot(aes(area,poptotal)) +
+    geom_point(aes(color = state, size = popdensity), position = "jitter") +
+    geom_smooth(se = F) +
+    labs(
+        title = "Scatterplot",
+        subtitle = "Area vs Population",
+        y = "Population",
+        x = "Area"
+    ) +
+    scale_x_continuous(limits = c(0,0.1), breaks = seq(0,0.1,0.025)) +
+    scale_y_continuous(limits = c(0,500000), breaks = seq(0,500000,100000), labels = \(x) format(x, big.mark = "", scientific = F)) +
+    theme_bw()
+plot2
+ggsave("../output/plot2.pdf", plot = plot2, width = 7, height = 4, dpi = 300)
+
+```
+
+# Counts plot
+
+```{r}
+data3 <- read_csv("../data/data_plot3.csv")
+glimpse(data3)
+data3 |> 
+    ggplot(aes(cty,hwy)) +
+    geom_count(show.legend = F, color = rgb(190,87,65, maxColorValue = 255)) +
+    labs(
+        title = "Counts plot",
+        subtitle = "mpg: city vs highway mileage"
+    ) +
+    theme_bw()
+
+ggsave("../output/plot3.pdf", width = 7, height = 4, dpi = 300)
+```
+
+# Divergent plot
+
+
+```{r}
+data4 <- read_csv("../data/data_plot4.csv")
+glimpse(data4)
+data4 |>
+    mutate(
+        mpg_z = scale(mpg),
+        mpg_avg = if_else(mpg_z < 0, "Below Average", "Above Average")
+    ) |> 
+    ggplot(aes(x = mpg_z, y = reorder(car_name, mpg_z), fill = mpg_avg)) +
+    geom_col() +
+    labs(
+        x = "MPG (Z-score)",
+        y = "Car Name",
+        fill = "Mileage"
+    ) +
+    scale_fill_manual(values = c(
+        "Above Average" = rgb(164,190,160, maxColorValue = 255),
+        "Below Average" = rgb(223,124,120, maxColorValue = 255)
+    )) +
+    theme_bw()
+
+ggsave("../output/plot4.pdf", height = 6, width = 8)
+```
+
+# Lollipop chart
+
+
+```{r}
+data5 <- read_csv("../data/data_plot5.csv")
+glimpse(data5)
+data5 |> 
+    ggplot(aes(x = reorder(manufacturer, mileage), y = mileage)) +
+    geom_segment(aes(xend = reorder(manufacturer, mileage), y = 0, yend = mileage), color = "gray80") + 
+    geom_point(color = "orange", size = 3) +
+    scale_y_continuous(limits = c(0,25), breaks = seq(0,25,5)) +
+    labs(
+        title = "Lollipop Chart",
+        subtitle = "Avgerage city mileage by manufacturer",
+        y = "Avg. Mileage",
+        x = "",
+        caption = "source: mpg"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 75, hjust = 0.5, vjust = 0.5),
+    panel.grid.major.x = element_blank())
+
+ggsave("../output/plot5.pdf", height = 6, width = 8)
+```
+
+# Volcano
+
+
+```{r}
+library(ggrepel)
+data6 <- read_csv("../data/data_plot6.csv")
+glimpse(data6)
+data6 |> 
+    mutate(
+        diffexp = case_when(
+            pvalue < 0.05 & log2FoldChange < -0.6 ~ "down",
+            pvalue < 0.05 & log2FoldChange > 0.6 ~ "up",
+            .default = "no"
+        ),
+        label = if_else(diffexp %in% c("down", "up"), gene_symbol, NA)
+    ) |> 
+    ggplot(aes(x = log2FoldChange, y = -log10(pvalue), label = label, color = diffexp)) +
+    geom_point(show.legend = F) +
+    geom_text_repel(show.legend = F, color = "black") +
+    scale_color_manual(values = c("down" = "blue", "no" = "black", "up" = "red")) +
+    labs(
+        title = "Volcano plot",
+        y = "-log10 (P-value)",
+        x = expression(log[2]*FC)
+    ) +
+    theme_classic() +
+    theme(panel.background = element_rect(fill = "gray95", color = "gray80"))
+
+ggsave("../output/plot6.pdf", height = 6, width = 8)
+```
